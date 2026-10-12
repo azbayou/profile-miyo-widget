@@ -38,6 +38,134 @@ Data Dasar Bayu Aziz:
   );
 }
 
+/**
+ * Panggilan ke Google Gemini API
+ * Model gratisan & cepat: gemini-1.5-flash (temperature 0.2 untuk anti-halu)
+ */
+async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage) {
+  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const formattedContents = [];
+  for (const h of history) {
+    if (h.role && h.content) {
+      formattedContents.push({
+        role: h.role === "assistant" || h.role === "model" ? "model" : "user",
+        parts: [{ text: h.content }]
+      });
+    }
+  }
+
+  formattedContents.push({
+    role: "user",
+    parts: [{ text: userMessage }]
+  });
+
+  const response = await fetch(geminiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      system_instruction: {
+        parts: [
+          {
+            text: `[INSTRUKSI SISTEM & ATURAN PERILAKU MIYO]\n${systemPrompt}\n\n[DATA PRIBADI BAYU AZIZ DARI GOOGLE SHEET (SINGLE SOURCE OF TRUTH)]\n${sheetData}`
+          }
+        ]
+      },
+      contents: formattedContents,
+      generationConfig: {
+        temperature: 0.2, // Rendah untuk meminimalkan halusinasi (anti-halu)
+        maxOutputTokens: 800
+      }
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok || data.error) {
+    const errMsg = data.error?.message || `Gemini API error (Status ${response.status})`;
+    throw new Error(errMsg);
+  }
+
+  const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!reply) {
+    throw new Error("Gemini tidak mengembalikan teks balasan.");
+  }
+
+  return reply;
+}
+
+/**
+ * Panggilan ke Groq API (MIYO_API_KEY)
+ * Model gratisan & anti-halu: llama-3.3-70b-versatile (dengan fallback otomatis ke llama-3.1-8b-instant)
+ */
+async function callGroq(apiKey, systemPrompt, sheetData, history, userMessage) {
+  const modelsToTry = [
+    process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant"
+  ];
+
+  const messages = [
+    {
+      role: "system",
+      content: `[INSTRUKSI SISTEM & ATURAN PERILAKU MIYO]\n${systemPrompt}\n\n[DATA PRIBADI BAYU AZIZ DARI GOOGLE SHEET (SINGLE SOURCE OF TRUTH)]\n${sheetData}`
+    }
+  ];
+
+  for (const h of history) {
+    if (h.role && h.content) {
+      messages.push({
+        role: h.role === "assistant" || h.role === "model" ? "assistant" : "user",
+        content: h.content
+      });
+    }
+  }
+
+  messages.push({
+    role: "user",
+    content: userMessage
+  });
+
+  let lastError = null;
+
+  for (const model of modelsToTry) {
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.2, // Rendah agar berpegang teguh pada data sheet & anti-halu
+          max_tokens: 800
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        const errMsg = data.error?.message || `Groq API error (${model}, Status ${response.status})`;
+        lastError = new Error(errMsg);
+        console.warn(`[Groq Failover] Model ${model} gagal: ${errMsg}`);
+        continue; // Coba model cadangan jika model ini overload / tidak tersedia
+      }
+
+      const reply = data.choices?.[0]?.message?.content;
+      if (reply) {
+        return reply;
+      }
+    } catch (err) {
+      lastError = err;
+      console.warn(`[Groq Failover] Permintaan ke ${model} gagal:`, err.message);
+    }
+  }
+
+  throw lastError || new Error("Groq API gagal menghasilkan balasan.");
+}
+
 export default async function handler(req, res) {
   // 1. Setup CORS headers
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -64,17 +192,20 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Pesan tidak boleh kosong." });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    const miyoKey = process.env.MIYO_API_KEY; // Groq API Key
+
+    if (!geminiKey && !miyoKey) {
       return res.status(500).json({
-        error: "Konfigurasi server belum lengkap: GEMINI_API_KEY belum disetel di Vercel Environment Variables."
+        error:
+          "Konfigurasi server belum lengkap: GEMINI_API_KEY atau MIYO_API_KEY belum disetel di Vercel Environment Variables."
       });
     }
 
     // 3. Ambil data pribadi dinamis dari Google Sheets (Sheet: miyo)
     const personalDataFromSheet = await fetchGoogleSheetData();
 
-    // 4. System Prompt: Hanya berisi Identitas, Sifat Dasar, Gaya Bahasa, dan Aturan Miyo
+    // 4. System Prompt: Identitas, Sifat Dasar, Gaya Bahasa, dan Aturan Miyo
     const systemPrompt = `[IDENTITAS & PERAN UTAMA]
 Kamu adalah Miyo, asisten virtual pribadi berbasis AI untuk Bayu Aziz.
 Tugas utamamu adalah mendampingi pengunjung di website portofolio Bayu, menjawab pertanyaan seputar latar belakang profesional, proyek, keahlian, dan cara menghubungi Bayu secara cerdas, ramah, dan solutif.
@@ -113,62 +244,47 @@ Contoh:
 - Email: [✉️ Email Bayu Aziz](mailto:azbayou@gmail.com)
 - Portofolio Web: [🌐 Web Portofolio Bayu](https://azbayou.github.io/profile)`;
 
-    // 5. Siapkan riwayat percakapan untuk Gemini API
-    const formattedContents = [];
-
     // Sertakan riwayat obrolan jika ada (maksimal 6 percakapan terakhir)
     const recentHistory = Array.isArray(history) ? history.slice(-6) : [];
-    for (const h of recentHistory) {
-      if (h.role && h.content) {
-        formattedContents.push({
-          role: h.role === "assistant" || h.role === "model" ? "model" : "user",
-          parts: [{ text: h.content }]
-        });
+
+    let reply = null;
+    let usedProvider = null;
+    const errors = [];
+
+    // 5. Coba Gemini API terlebih dahulu jika kuncinya tersedia
+    if (geminiKey) {
+      try {
+        reply = await callGemini(geminiKey, systemPrompt, personalDataFromSheet, recentHistory, message.trim());
+        usedProvider = "gemini";
+      } catch (err) {
+        console.warn("[Chatbot Failover] Gemini API mengalami kendala/overload:", err.message);
+        errors.push(`Gemini: ${err.message}`);
       }
     }
 
-    // Gabungkan System Prompt + Data Google Sheet + Pesan Pengguna
-    formattedContents.push({
-      role: "user",
-      parts: [
-        {
-          text: `[INSTRUKSI SISTEM & ATURAN PERILAKU MIYO]\n${systemPrompt}\n\n[DATA PRIBADI BAYU AZIZ DARI GOOGLE SHEET (SINGLE SOURCE OF TRUTH)]\n${personalDataFromSheet}\n\n[PERTANYAAN PENGUNJUNG SAAT INI]\n${message.trim()}`
-        }
-      ]
-    });
-
-    // 6. Panggil Google Gemini API v1beta (Gemini 1.5 Flash)
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
-
-    const geminiResponse = await fetch(geminiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        contents: formattedContents,
-        generationConfig: {
-          temperature: 0.25,
-          maxOutputTokens: 800
-        }
-      })
-    });
-
-    const geminiData = await geminiResponse.json();
-
-    if (!geminiResponse.ok || geminiData.error) {
-      const errMsg = geminiData.error?.message || `Gemini API error (Status ${geminiResponse.status})`;
-      console.error("Gemini API Error:", errMsg);
-      return res.status(502).json({ error: errMsg });
+    // 6. Jika Gemini gagal (overload/rate limit/error) atau key tidak ada, beralih ke Groq (MIYO_API_KEY)
+    if (!reply && miyoKey) {
+      try {
+        console.log("[Chatbot Failover] Mengalihkan permintaan ke Groq API (MIYO_API_KEY)...");
+        reply = await callGroq(miyoKey, systemPrompt, personalDataFromSheet, recentHistory, message.trim());
+        usedProvider = "groq";
+      } catch (err) {
+        console.error("[Chatbot Failover] Groq API juga mengalami kendala:", err.message);
+        errors.push(`Groq: ${err.message}`);
+      }
     }
 
-    const reply =
-      geminiData.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "Maaf, Miyo sedang kesulitan menyusun respon saat ini. -Miyo~";
+    // 7. Jika seluruh penyedia AI gagal
+    if (!reply) {
+      return res.status(502).json({
+        error: `Semua layanan AI sedang sibuk atau overload. Silakan coba beberapa saat lagi. Detail: ${errors.join(" | ")}`
+      });
+    }
 
-    return res.status(200).json({ reply });
+    return res.status(200).json({ reply, provider: usedProvider });
   } catch (err) {
     console.error("Internal Server Error:", err);
     return res.status(500).json({ error: "Terjadi kesalahan internal pada server chatbot." });
   }
 }
+
