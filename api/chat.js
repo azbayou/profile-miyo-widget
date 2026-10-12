@@ -43,8 +43,11 @@ Data Dasar Bayu Aziz:
  * Model gratisan & cepat: gemini-1.5-flash (temperature 0.2 untuk anti-halu)
  */
 async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage) {
-  const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const modelsToTry = [
+    process.env.GEMINI_MODEL || "gemini-flash-latest",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash"
+  ];
 
   const formattedContents = [];
   for (const h of history) {
@@ -61,49 +64,59 @@ async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage)
     parts: [{ text: userMessage }]
   });
 
-  const response = await fetch(geminiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      system_instruction: {
-        parts: [
-          {
-            text: `[INSTRUKSI SISTEM & ATURAN PERILAKU MIYO]\n${systemPrompt}\n\n[DATA PRIBADI BAYU AZIZ DARI GOOGLE SHEET (SINGLE SOURCE OF TRUTH)]\n${sheetData}`
+  const geminiErrors = [];
+
+  for (const model of modelsToTry) {
+    try {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const response = await fetch(geminiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [
+              {
+                text: `[INSTRUKSI SISTEM & ATURAN PERILAKU MIYO]\n${systemPrompt}\n\n[DATA PRIBADI BAYU AZIZ DARI GOOGLE SHEET (SINGLE SOURCE OF TRUTH)]\n${sheetData}`
+              }
+            ]
+          },
+          contents: formattedContents,
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 800
           }
-        ]
-      },
-      contents: formattedContents,
-      generationConfig: {
-        temperature: 0.2, // Rendah untuk meminimalkan halusinasi (anti-halu)
-        maxOutputTokens: 800
+        })
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch (parseErr) {
+        geminiErrors.push(`${model}: HTTP ${response.status}`);
+        continue;
       }
-    })
-  });
 
-  let data;
-  try {
-    data = await response.json();
-  } catch (parseErr) {
-    throw new Error(`Gemini API error (Status ${response.status}): Tidak dapat membaca format respon`);
-  }
+      if (!response.ok || data.error) {
+        const errMsg = data.error?.message || `Status ${response.status}`;
+        geminiErrors.push(`${model}: ${errMsg}`);
+        continue;
+      }
 
-  if (!response.ok || data.error) {
-    const errMsg = data.error?.message || `Gemini API error (Status ${response.status})`;
-    throw new Error(errMsg);
-  }
+      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (reply) {
+        return reply;
+      }
 
-  const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!reply) {
-    const finishReason = data.candidates?.[0]?.finishReason;
-    if (finishReason && finishReason !== "STOP") {
-      throw new Error(`Gemini selesai dengan status: ${finishReason}`);
+      const finishReason = data.candidates?.[0]?.finishReason;
+      geminiErrors.push(`${model}: finishReason ${finishReason || "empty"}`);
+    } catch (err) {
+      geminiErrors.push(`${model}: ${err.message}`);
     }
-    throw new Error("Gemini tidak mengembalikan teks balasan.");
   }
 
-  return reply;
+  throw new Error(`Gemini gagal (${geminiErrors.join(" | ")})`);
 }
 
 /**
@@ -112,8 +125,9 @@ async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage)
  */
 async function callGroq(apiKey, systemPrompt, sheetData, history, userMessage) {
   const modelsToTry = [
-    process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant"
+    process.env.GROQ_MODEL || "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b"
   ];
 
   const messages = [
@@ -192,8 +206,8 @@ export default async function handler(req, res) {
   }
 
   if (req.method === "GET" && req.query && req.query.debug === "groq") {
-    const miyoKey = process.env.MIYO_API_KEY;
-    if (!miyoKey) return res.status(400).json({ error: "MIYO_API_KEY belum disetel di Vercel" });
+    const miyoKey = process.env.GROQ_API_KEY || process.env.GROQ_API || process.env.MIYO_API_KEY;
+    if (!miyoKey) return res.status(400).json({ error: "GROQ_API_KEY / MIYO_API_KEY belum disetel di Vercel" });
     const groqResp = await fetch("https://api.groq.com/openai/v1/models", {
       headers: { Authorization: `Bearer ${miyoKey}` }
     });
