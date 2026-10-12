@@ -62,15 +62,18 @@ async function fetchGoogleSheetData() {
 }
 
 /**
- * Panggilan ke Google Gemini API (Model resmi, cepat, dan timeout ketat 4s per attempt)
+ * Panggilan ke Google Gemini API (Model resmi Gemini 3, cepat, dan timeout ketat 4s per attempt)
  */
 async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage) {
-  const modelsToTry = [
-    process.env.GEMINI_MODEL || "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
-    "gemini-2.0-flash",
-    "gemini-flash-latest"
+  const rawModels = [
+    process.env.GEMINI_MODEL || "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3-flash-preview",
+    "gemini-3.1-pro-preview"
   ];
+  const modelsToTry = [...new Set(rawModels.filter(Boolean))];
 
   const formattedContents = [];
   for (const h of history) {
@@ -149,14 +152,16 @@ async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage)
 
 /**
  * Panggilan ke Groq API (Inferensi ultra cepat ~300-800ms)
- * Menggunakan model resmi aktif: llama-3.1-8b-instant (kilat) & llama-3.3-70b-versatile (cerdas)
+ * Menggunakan model produksi resmi: llama-3.1-8b-instant, llama-3.3-70b-versatile, openai/gpt-oss-120b, openai/gpt-oss-20b
  */
 async function callGroq(apiKey, systemPrompt, sheetData, history, userMessage) {
-  const modelsToTry = [
+  const rawModels = [
     process.env.GROQ_MODEL || "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
-    "mixtral-8x7b-32768"
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b"
   ];
+  const modelsToTry = [...new Set(rawModels.filter(Boolean))];
 
   const messages = [
     {

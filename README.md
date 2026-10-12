@@ -19,8 +19,8 @@ Serverless Chatbot API untuk asisten virtual pribadi **Miyo** pada website porto
 
 Endpoint `/api/chat` mengimplementasikan strategi **Dual-AI Failover Berkecepatan Tinggi**:
 
-1. **AI Google Gemini**: Menggunakan `GEMINI_API_KEY` dengan model cepat `gemini-1.5-flash` (otomatis failover ke `gemini-1.5-flash-8b` / `gemini-2.0-flash`). Dilengkapi timeout ketat 4 detik per attempt.
-2. **AI Groq (LPU Inference)**: Menggunakan `MIYO_API_KEY` atau `GROQ_API_KEY` dengan model kilat `llama-3.1-8b-instant` (~300–800ms) dan `llama-3.3-70b-versatile`.
+1. **AI Google Gemini**: Menggunakan `GEMINI_API_KEY` dengan model Gemini 3 terbaru seperti `gemini-3.8-flash` (otomatis failover ke `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-3.6-flash`, dll.). Dilengkapi timeout ketat 4 detik per attempt.
+2. **AI Groq (LPU Inference)**: Menggunakan `MIYO_API_KEY` atau `GROQ_API_KEY` dengan model produksi aktif: `llama-3.1-8b-instant` (560 T/s), `llama-3.3-70b-versatile` (280 T/s), `openai/gpt-oss-120b` (500 T/s), dan `openai/gpt-oss-20b` (1000 T/s).
 
 ### Fitur Optimasi Kecepatan yang Diterapkan
 - **Timeout Cepat (4 detik)**: Tidak ada lagi request yang menggantung lama (15-30 detik). Jika provider utama lambat atau antre, backend langsung mengalihkan ke provider cadangan.
@@ -39,7 +39,7 @@ Tambahkan variabel lingkungan berikut di dashboard **Vercel > Settings > Environ
 | `GEMINI_API_KEY` | Direkomendasikan | API Key Google AI Studio |
 | `MIYO_API_KEY` / `GROQ_API_KEY` | Direkomendasikan | API Key Groq Cloud Console |
 | `PREFER_GROQ` | Opsional | Set `true` untuk mendahulukan Groq (kecepatan respon < 1 detik) |
-| `GEMINI_MODEL` | Opsional | Default: `gemini-1.5-flash` |
-| `GROQ_MODEL` | Opsional | Default: `llama-3.1-8b-instant` (atau `llama-3.3-70b-versatile`) |
+| `GEMINI_MODEL` | Opsional | Default: `gemini-3.8-flash` (atau `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-3.6-flash`) |
+| `GROQ_MODEL` | Opsional | Default: `llama-3.1-8b-instant` (atau `openai/gpt-oss-20b`, `llama-3.3-70b-versatile`, `openai/gpt-oss-120b`) |
 
 > *Catatan: Minimal salah satu dari `GEMINI_API_KEY` atau `MIYO_API_KEY`/`GROQ_API_KEY` harus tersedia agar chatbot dapat beroperasi.*
