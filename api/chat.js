@@ -45,8 +45,8 @@ Data Dasar Bayu Aziz:
 async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage) {
   const modelsToTry = [
     process.env.GEMINI_MODEL || "gemini-flash-latest",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash"
+    "gemini-3.8-flash",
+    "gemini-3.8-flash-lite"
   ];
 
   const formattedContents = [];
