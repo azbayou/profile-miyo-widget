@@ -1,0 +1,12 @@
+{
+  "name": "miyo-chatbot",
+  "version": "1.0.0",
+  "description": "Serverless Chatbot Miyo untuk Web Portofolio Bayu Aziz",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "keywords": ["chatbot", "gemini", "vercel", "serverless", "portfolio"],
+  "author": "Bayu Aziz",
+  "license": "MIT"
+}
