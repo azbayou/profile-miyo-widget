@@ -43,7 +43,7 @@ Data Dasar Bayu Aziz:
  * Model gratisan & cepat: gemini-1.5-flash (temperature 0.2 untuk anti-halu)
  */
 async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage) {
-  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+  const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
   const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const formattedContents = [];
@@ -82,7 +82,13 @@ async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage)
     })
   });
 
-  const data = await response.json();
+  let data;
+  try {
+    data = await response.json();
+  } catch (parseErr) {
+    throw new Error(`Gemini API error (Status ${response.status}): Tidak dapat membaca format respon`);
+  }
+
   if (!response.ok || data.error) {
     const errMsg = data.error?.message || `Gemini API error (Status ${response.status})`;
     throw new Error(errMsg);
@@ -90,6 +96,10 @@ async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage)
 
   const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!reply) {
+    const finishReason = data.candidates?.[0]?.finishReason;
+    if (finishReason && finishReason !== "STOP") {
+      throw new Error(`Gemini selesai dengan status: ${finishReason}`);
+    }
     throw new Error("Gemini tidak mengembalikan teks balasan.");
   }
 
@@ -127,7 +137,7 @@ async function callGroq(apiKey, systemPrompt, sheetData, history, userMessage) {
     content: userMessage
   });
 
-  let lastError = null;
+  const groqErrors = [];
 
   for (const model of modelsToTry) {
     try {
@@ -140,17 +150,17 @@ async function callGroq(apiKey, systemPrompt, sheetData, history, userMessage) {
         body: JSON.stringify({
           model,
           messages,
-          temperature: 0.2, // Rendah agar berpegang teguh pada data sheet & anti-halu
+          temperature: 0.2,
           max_tokens: 800
         })
       });
 
       const data = await response.json();
       if (!response.ok || data.error) {
-        const errMsg = data.error?.message || `Groq API error (${model}, Status ${response.status})`;
-        lastError = new Error(errMsg);
+        const errMsg = data.error?.message || `Status ${response.status}`;
+        groqErrors.push(`${model}: ${errMsg}`);
         console.warn(`[Groq Failover] Model ${model} gagal: ${errMsg}`);
-        continue; // Coba model cadangan jika model ini overload / tidak tersedia
+        continue;
       }
 
       const reply = data.choices?.[0]?.message?.content;
@@ -158,12 +168,12 @@ async function callGroq(apiKey, systemPrompt, sheetData, history, userMessage) {
         return reply;
       }
     } catch (err) {
-      lastError = err;
+      groqErrors.push(`${model}: ${err.message}`);
       console.warn(`[Groq Failover] Permintaan ke ${model} gagal:`, err.message);
     }
   }
 
-  throw lastError || new Error("Groq API gagal menghasilkan balasan.");
+  throw new Error(`Groq API gagal (${groqErrors.join(" | ")})`);
 }
 
 export default async function handler(req, res) {
@@ -181,6 +191,16 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
+  if (req.method === "GET" && req.query && req.query.debug === "groq") {
+    const miyoKey = process.env.MIYO_API_KEY;
+    if (!miyoKey) return res.status(400).json({ error: "MIYO_API_KEY belum disetel di Vercel" });
+    const groqResp = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { Authorization: `Bearer ${miyoKey}` }
+    });
+    const groqData = await groqResp.json();
+    return res.status(groqResp.status).json(groqData);
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed. Gunakan POST." });
   }
@@ -192,13 +212,13 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Pesan tidak boleh kosong." });
     }
 
-    const geminiKey = process.env.GEMINI_API_KEY;
-    const miyoKey = process.env.MIYO_API_KEY; // Groq API Key
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.GEMINI_API;
+    const groqKey = process.env.GROQ_API_KEY || process.env.GROQ_API || process.env.MIYO_API_KEY;
 
-    if (!geminiKey && !miyoKey) {
+    if (!geminiKey && !groqKey) {
       return res.status(500).json({
         error:
-          "Konfigurasi server belum lengkap: GEMINI_API_KEY atau MIYO_API_KEY belum disetel di Vercel Environment Variables."
+          "Konfigurasi server belum lengkap: GEMINI_API_KEY atau GROQ_API_KEY/GROQ_API belum disetel di Vercel Environment Variables."
       });
     }
 
@@ -263,10 +283,10 @@ Contoh:
     }
 
     // 6. Jika Gemini gagal (overload/rate limit/error) atau key tidak ada, beralih ke Groq (MIYO_API_KEY)
-    if (!reply && miyoKey) {
+    if (!reply && groqKey) {
       try {
         console.log("[Chatbot Failover] Mengalihkan permintaan ke Groq API (MIYO_API_KEY)...");
-        reply = await callGroq(miyoKey, systemPrompt, personalDataFromSheet, recentHistory, message.trim());
+        reply = await callGroq(groqKey, systemPrompt, personalDataFromSheet, recentHistory, message.trim());
         usedProvider = "groq";
       } catch (err) {
         console.error("[Chatbot Failover] Groq API juga mengalami kendala:", err.message);
