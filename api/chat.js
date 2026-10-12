@@ -45,8 +45,8 @@ Data Dasar Bayu Aziz:
 async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage) {
   const modelsToTry = [
     process.env.GEMINI_MODEL || "gemini-flash-latest",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash"
+    "gemini-3.8-flash",
+    "gemini-3.8-flash-lite"
   ];
 
   const formattedContents = [];
@@ -264,9 +264,6 @@ Tugas utamamu adalah mendampingi pengunjung di website portofolio Bayu, menjawab
    - Jelaskan fungsi tools tersebut secara ringkas.
    - Hubungkan secara jujur dengan tools serupa yang sudah sangat dikuasai Bayu (misal SQL, Looker Studio, Metabase, Python, Spreadsheet).
    - Tekankan kemampuan adaptasi dan pemahaman logika data yang dimiliki Bayu.
-4. Promosi Proyek RAG Portofolio:
-   Jika pengguna menanyakan kemampuan AI, RAG (Retrieval-Augmented Generation), atau Machine Learning Bayu, jelaskan bahwa Bayu membangun sistem RAG lengkap menggunakan LangChain, ChromaDB, dan Gemini, lalu arahkan mereka ke repository GitHub:
-   [🔗 Repository RAG Chatbot](https://github.com/azbayou/rag-chatbot-pribadi)
 
 [FORMAT TOMBOL & LINK (MANDATORI)]
 Setiap kali kamu menyebutkan kontak, media sosial, atau tautan luar, KAMU WAJIB memformatnya menggunakan Markdown Link bergaya tombol:
