@@ -40,6 +40,6 @@ Tambahkan variabel lingkungan berikut di dashboard **Vercel > Settings > Environ
 | `MIYO_API_KEY` / `GROQ_API_KEY` | Direkomendasikan | API Key Groq Cloud Console |
 | `PREFER_GROQ` | Opsional | Set `true` untuk mendahulukan Groq (kecepatan respon < 1 detik) |
 | `GEMINI_MODEL` | Opsional | Default: `gemini-3.8-flash` (atau `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-3.6-flash`) |
-| `GROQ_MODEL` | Opsional | Default: `llama-3.1-8b-instant` (atau `openai/gpt-oss-20b`, `llama-3.3-70b-versatile`, `openai/gpt-oss-120b`) |
+| `GROQ_MODEL` | Opsional | Default: `openai/gpt-oss-20b` (atau `openai/gpt-oss-120b`, `llama-3.1-8b-instant`) |
 
 > *Catatan: Minimal salah satu dari `GEMINI_API_KEY` atau `MIYO_API_KEY`/`GROQ_API_KEY` harus tersedia agar chatbot dapat beroperasi.*

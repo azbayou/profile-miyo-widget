@@ -65,8 +65,14 @@ async function fetchGoogleSheetData() {
  * Panggilan ke Google Gemini API (Model resmi Gemini 3, cepat, dan timeout ketat 4s per attempt)
  */
 async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage) {
+  // Abaikan env GEMINI_MODEL jika masih berisi model legacy (1.5 / 2.0 / latest) dari settingan lama di Vercel
+  const envModel = process.env.GEMINI_MODEL;
+  const isLegacy = envModel && (envModel.includes("1.5") || envModel.includes("2.0") || envModel.includes("flash-latest"));
+  const primaryModel = (!isLegacy && envModel) ? envModel : "gemini-3.8-flash";
+
   const rawModels = [
-    process.env.GEMINI_MODEL || "gemini-3.8-flash",
+    primaryModel,
+    "gemini-3.8-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
     "gemini-3.6-flash",
@@ -155,11 +161,18 @@ async function callGemini(apiKey, systemPrompt, sheetData, history, userMessage)
  * Menggunakan model produksi resmi: llama-3.1-8b-instant, llama-3.3-70b-versatile, openai/gpt-oss-120b, openai/gpt-oss-20b
  */
 async function callGroq(apiKey, systemPrompt, sheetData, history, userMessage) {
+  // Abaikan env GROQ_MODEL jika masih bernilai model decommissioned (seperti mixtral)
+  const envModel = process.env.GROQ_MODEL;
+  const isLegacy = envModel && (envModel.includes("mixtral") || envModel.includes("llama-3-8b"));
+  // Prioritaskan openai/gpt-oss-20b (1000 T/s, Developer Plan aktif) & 120b (500 T/s), lalu Llama Enterprise
+  const primaryModel = (!isLegacy && envModel) ? envModel : "openai/gpt-oss-20b";
+
   const rawModels = [
-    process.env.GROQ_MODEL || "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
+    primaryModel,
+    "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b"
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile"
   ];
   const modelsToTry = [...new Set(rawModels.filter(Boolean))];
 
@@ -256,6 +269,41 @@ export default async function handler(req, res) {
     } catch (debugErr) {
       return res.status(500).json({ error: debugErr.message });
     }
+  }
+
+  // Debug endpoint untuk cek model Gemini yang tersedia
+  if (req.method === "GET" && req.query && req.query.debug === "gemini") {
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.GEMINI_API;
+    if (!geminiKey) return res.status(400).json({ error: "GEMINI_API_KEY belum disetel di Vercel" });
+    try {
+      const geminiResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`);
+      const geminiData = await geminiResp.json();
+      return res.status(geminiResp.status).json(geminiData);
+    } catch (debugErr) {
+      return res.status(500).json({ error: debugErr.message });
+    }
+  }
+
+  // Debug endpoint status versi deployment & daftar model aktif
+  if (req.method === "GET" && req.query && req.query.debug === "status") {
+    return res.status(200).json({
+      status: "online",
+      version: "2026.10-gemini3-groq-production",
+      configured_gemini_models: [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3-flash-preview",
+        "gemini-3.1-pro-preview"
+      ],
+      configured_groq_models: [
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile"
+      ]
+    });
   }
 
   if (req.method !== "POST") {
